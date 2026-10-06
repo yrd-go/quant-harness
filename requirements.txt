@@ -1,0 +1,33 @@
+# quant-harness 依赖清单
+# 生成依据: 扫描项目 *.py 的实际 import 语句(非凭印象)
+# 安装: pip install -r requirements.txt
+
+# ---------- 数据获取 ----------
+akshare                 # 行情/基本面/新闻/财报日历的数据源(四个脚本都依赖)
+requests                # news_agent 抓新闻正文用
+
+# ---------- 数据处理 ----------
+pandas                  # 全项目的数据处理基础
+numpy                   # plot_heatmap 里的数值计算 / 矩阵掩码
+
+# ---------- 可视化 ----------
+matplotlib              # 图表绘制(backtest 资金曲线 / plot_heatmap / quant_demo)
+
+# ---------- 回测 ----------
+backtrader              # backtest.py 的回测引擎
+
+# ---------- 多智能体 ----------
+langgraph               # 多智能体状态图编排(并行分支 + barrier 汇聚)
+langchain-core          # 工具定义 / 消息类型(ToolMessage 等)
+langchain-openai        # ChatOpenAI 客户端(DeepSeek 走 OpenAI 兼容协议)
+
+# ---------- 前端 ----------
+streamlit               # app.py 网页界面
+
+# ---------- 配置 ----------
+python-dotenv           # 从 .env 读取 API Key(绝不把 Key 写进代码)
+
+# ---------- 可选依赖 ----------
+# seaborn 非必需: plot_heatmap.py 的 seaborn 路径有 matplotlib 回退,
+# 未安装时脚本会自动走手绘路径, 功能不受影响。想要更好的热力图观感再装。
+seaborn
