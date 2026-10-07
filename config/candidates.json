@@ -1,0 +1,171 @@
+{
+  "generated_at": "2026-10-06 19:09:09",
+  "timezone": "Asia/Shanghai (UTC+8)",
+  "spot_source": "sina",
+  "kline_sources": {
+    "tencent": 29
+  },
+  "stages": {
+    "market_total": 5571,
+    "after_filter": 5017,
+    "top_amount": 30,
+    "momentum_ok": 29,
+    "final": 15
+  },
+  "params": {
+    "amount_top_n": 30,
+    "momentum_top_n": 15,
+    "momentum_window": 20,
+    "adjust": "qfq"
+  },
+  "excluded": {
+    "exchange": 348,
+    "st": 199,
+    "suspended": 7,
+    "bad_price": 0,
+    "momentum_failed": 1
+  },
+  "checks": {
+    "attempted": 30,
+    "momentum_ok": 29,
+    "fail_ratio": 0.0333,
+    "final": 15
+  },
+  "candidates": [
+    {
+      "rank": 1,
+      "symbol": "600641",
+      "name": "先导基电",
+      "amount": 3932878022.0,
+      "momentum_pct": 46.52,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 2,
+      "symbol": "002487",
+      "name": "大金重工",
+      "amount": 4195666361.0,
+      "momentum_pct": 35.71,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 3,
+      "symbol": "000002",
+      "name": "万 科Ａ",
+      "amount": 5158052404.0,
+      "momentum_pct": 34.81,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 4,
+      "symbol": "600418",
+      "name": "江淮汽车",
+      "amount": 7492598087.0,
+      "momentum_pct": 30.81,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 5,
+      "symbol": "300489",
+      "name": "光智科技",
+      "amount": 3887786503.0,
+      "momentum_pct": 19.26,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 6,
+      "symbol": "603083",
+      "name": "剑桥科技",
+      "amount": 4318154355.0,
+      "momentum_pct": 11.4,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 7,
+      "symbol": "603259",
+      "name": "药明康德",
+      "amount": 7441616091.0,
+      "momentum_pct": 8.74,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 8,
+      "symbol": "300450",
+      "name": "先导智能",
+      "amount": 4096895561.0,
+      "momentum_pct": 6.49,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 9,
+      "symbol": "300394",
+      "name": "天孚通信",
+      "amount": 7708344434.0,
+      "momentum_pct": 3.78,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 10,
+      "symbol": "600276",
+      "name": "恒瑞医药",
+      "amount": 5234863148.0,
+      "momentum_pct": 2.1,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 11,
+      "symbol": "688008",
+      "name": "澜起科技",
+      "amount": 5433706001.0,
+      "momentum_pct": 2.0,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 12,
+      "symbol": "688825",
+      "name": "长鑫科技",
+      "amount": 6413280931.0,
+      "momentum_pct": -3.03,
+      "bars": 47,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 13,
+      "symbol": "600519",
+      "name": "贵州茅台",
+      "amount": 4797246636.0,
+      "momentum_pct": -3.15,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 14,
+      "symbol": "000725",
+      "name": "京东方Ａ",
+      "amount": 5227446291.0,
+      "momentum_pct": -3.21,
+      "bars": 60,
+      "kline_source": "tencent"
+    },
+    {
+      "rank": 15,
+      "symbol": "300502",
+      "name": "新易盛",
+      "amount": 9604023849.0,
+      "momentum_pct": -3.43,
+      "bars": 60,
+      "kline_source": "tencent"
+    }
+  ]
+}
