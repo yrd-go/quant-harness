@@ -1,0 +1,75 @@
+{
+  "signal_day": "2026-10-09",
+  "orders": [
+    {
+      "symbol": "688655",
+      "side": "buy",
+      "shares": 100,
+      "price": 66.1,
+      "reason": "建仓"
+    },
+    {
+      "symbol": "002815",
+      "side": "buy",
+      "shares": 300,
+      "price": 21.62,
+      "reason": "建仓"
+    },
+    {
+      "symbol": "000823",
+      "side": "buy",
+      "shares": 300,
+      "price": 21.33,
+      "reason": "建仓"
+    },
+    {
+      "symbol": "000678",
+      "side": "buy",
+      "shares": 500,
+      "price": 12.62,
+      "reason": "建仓"
+    },
+    {
+      "symbol": "601811",
+      "side": "buy",
+      "shares": 300,
+      "price": 20.91,
+      "reason": "建仓"
+    },
+    {
+      "symbol": "600059",
+      "side": "buy",
+      "shares": 500,
+      "price": 11.66,
+      "reason": "建仓"
+    },
+    {
+      "symbol": "000993",
+      "side": "buy",
+      "shares": 300,
+      "price": 17.89,
+      "reason": "建仓"
+    },
+    {
+      "symbol": "003006",
+      "side": "buy",
+      "shares": 200,
+      "price": 22.84,
+      "reason": "建仓"
+    },
+    {
+      "symbol": "600641",
+      "side": "buy",
+      "shares": 100,
+      "price": 44.66,
+      "reason": "建仓"
+    },
+    {
+      "symbol": "601579",
+      "side": "buy",
+      "shares": 100,
+      "price": 40.28,
+      "reason": "建仓"
+    }
+  ]
+}

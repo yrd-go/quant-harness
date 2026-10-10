@@ -21,6 +21,7 @@ import test_roe_available  # noqa: E402,F401
 import test_fetch_start  # noqa: E402,F401
 import test_roll_cleanup  # noqa: E402,F401
 import test_vacuum_neutral  # noqa: E402,F401
+import test_paper_broker  # noqa: E402,F401
 
 
 def main(argv: list[str]) -> int:
