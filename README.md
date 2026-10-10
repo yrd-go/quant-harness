@@ -26,39 +26,39 @@ Quant-Harness 是一个面向个人投资者的**全栈 AI 投研辅助系统**�
 
 ```mermaid
 flowchart TB
-    subgraph L1["① 第一层 · 全市场海选（零 LLM，纯 pandas）"]
-        A1["全市场快照<br/>5571 只"] --> A2["硬性剔除<br/>ST / 北交所 / 停牌 / 价格异常"]
-        A2 --> A3["成交额 Top 300<br/>（流动性代理指标）"]
+    subgraph L1["第一层 全市场海选（零 LLM，纯 pandas）"]
+        A1["全市场快照 5571 只"] --> A2["硬性剔除 ST / 北交所 / 停牌"]
+        A2 --> A3["成交额 Top 300"]
         A3 --> A4["20 日动量 Top 100"]
     end
 
-    subgraph L2["② 第二层 · 宏观 + 财报过滤（1 次 LLM 调用）"]
-        B1["财新宏观新闻<br/>100 条摘要"] --> B3["合并为单份提示词"]
-        B2["全 A 股财报披露日历<br/>stock_yysj_em"] --> B3
-        B3 --> B4{"1 次大模型调用<br/>输出结构化筛选"}
+    subgraph L2["第二层 宏观 + 财报过滤（1 次 LLM 调用）"]
+        B1["财新宏观新闻 100 条摘要"] --> B3["合并为单份提示词"]
+        B2["全 A 股财报披露日历"] --> B3
+        B3 --> B4{"1 次大模型调用"}
         B4 --> B5["目标池 15 只"]
     end
 
-    subgraph L3["③ 第三层 · 多智能体投委会（LangGraph）"]
-        C1["基本面分析师<br/>PE / PB / ROE"]
-        C2["技术面分析师<br/>动量 / 区间位置"]
-        C3["风险管理员<br/>沪深300 MA20 避险判定"]
-        C1 --> C4["投资组合经理<br/>汇总 + 调用回测工具"]
+    subgraph L3["第三层 多智能体投委会（LangGraph）"]
+        C1["基本面分析师 PE / PB / ROE"]
+        C2["技术面分析师 动量 / 区间位置"]
+        C3["风险管理员 沪深300 MA20 避险判定"]
+        C1 --> C4["投资组合经理 汇总 + 调用回测工具"]
         C2 --> C4
         C3 --> C4
     end
 
-    subgraph DL["数据层 · SQLite"]
-        D1["daily_price<br/>行情 / 前复权"]
-        D2["fundamentals<br/>PE / PB / ROE"]
+    subgraph DL["数据层 SQLite"]
+        D1["daily_price 行情 / 前复权"]
+        D2["fundamentals PE / PB / ROE"]
     end
 
     A4 --> B1
     A4 --> B2
     B5 --> L3
-    DL -. 供数 .-> L2
-    DL -. 供数 .-> L3
-    C4 --> E1["买入 / 持有 / 卖出<br/>+ 仓位建议"]
+    DL -.->|供数| L2
+    DL -.->|供数| L3
+    C4 --> E1["买入 / 持有 / 卖出 + 仓位建议"]
     C4 --> E2["Streamlit 前端"]
 
     style L1 fill:#1a2b3c,stroke:#4a90d9,color:#fff
@@ -84,13 +84,13 @@ flowchart TB
 - 按成交额排序（Top 300）后计算 20 日动量，筛选出前 100 只作为候选池。
 - *纯 Pandas 运算，零大模型消耗，速度极快。*
 
-![全市场海选终端输出](1-market-screening-terminal.png?raw=true)
+![全市场海选终端输出](1-market-screening-terminal.png)
 
 **2. 第二层（宏观层） - `src/news_agent.py`**
 - 接入财新宏观新闻（100 条摘要）与全 A 股财报预约披露日历。
 - **一次合并大模型调用**（控制 Token 消耗），对候选股进行"宏观情绪 + 财报雷区"双重过滤，收敛至 15 只目标股。
 
-![宏观新闻+财报预警终端日志](2-macro-earnings-filter.png?raw=true)
+![宏观新闻+财报预警终端日志](2-macro-earnings-filter.png)
 
 **3. 第三层（决策层） - `quant_agent.py`**
 - 基于 **LangGraph** 编排多智能体投委会：
@@ -99,8 +99,8 @@ flowchart TB
   - 🛡 **风险管理员**：判断大盘 MA20 避险状态。
   - 🏛 **投资组合经理**：汇总三方意见 + 调用回测工具，给出最终的买入/持有/卖出决策。
 
-![投资委员会决策报告](3-investment-committee-report.png?raw=true)
-![Agent工作流程与回测数据](4-agent-workflow-and-backtest.png?raw=true)
+![投资委员会决策报告](3-investment-committee-report.png)
+![Agent工作流程与回测数据](4-agent-workflow-and-backtest.png)
 
 ---
 
