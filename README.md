@@ -212,6 +212,42 @@ python quant_agent.py --symbol 600418 --years 3                   # 第三层（
 
 ---
 
+## ✅ 测试
+
+```bash
+python tests/run_tests.py          # 全部 34 个用例
+python tests/run_tests.py -q       # 只看汇总
+python tests/run_tests.py vacuum   # 只跑名字含 vacuum 的
+```
+
+退出码 `0` = 全部通过，`1` = 有失败（可直接用于 CI）。
+
+**零依赖**：不依赖 pytest（部署环境网络受限，PyPI 下载常超时），自带一个 30 行的迷你 runner。
+
+### 覆盖范围
+
+| 测试文件 | 覆盖什么 | 用例数 |
+|---|---|---|
+| `test_roe_available.py` | ROE 法定披露日映射（含年报 120 天滞后）| 8 |
+| `test_fetch_start.py` | 逐标的基准（新标的回补 5 年 / 老标的 +1 天）| 6 |
+| `test_roll_cleanup.py` | 滚动清理幂等性与 cutoff 边界 | 8 |
+| `test_vacuum_neutral.py` | **信息真空期强制改写（注入测试）** | 12 |
+
+### 测试的有效性经过验证（变异测试）
+
+一次就全过的测试很可能是"假测试"（断言太松、或压根没测到）。所以用**变异测试**验证保护力 —— 故意把源码改坏，看能否被抓到：
+
+| 注入的缺陷 | 是否被抓 | 失败用例数 |
+|---|---|---|
+| 关掉信息真空期护栏 | ✅ 抓到 | 6 |
+| 真空期判定放宽（把"有财报"也算真空）| ✅ 抓到 | 2 |
+| ROE 年报改成"报告期当天可用"（即前视偏差）| ✅ 抓到 | 2 |
+| 逐标的基准退化为全局基准（新标的只拉 1 天）| ✅ 抓到 | 3 |
+
+**4/4 全部被抓到**，还原源码后 34/34 恢复通过 —— 说明这些测试在真实退化时会失败，而不是永远绿灯。
+
+---
+
 ## ⚠️ 已知局限
 
 **主动列出，因为知道边界比假装没有边界更重要。**
@@ -251,13 +287,16 @@ python quant_agent.py --symbol 600418 --years 3                   # 第三层（
 
 `src/data_center.py` 的 `UNIVERSE` 硬编码 5 只作为兜底。虽然已支持 `--pool` / `--symbol` / 全库增量更新，但默认全量建库仍只建这 5 只。
 
-### 5. 测试覆盖不足
+### 5. 测试覆盖仍不完整
 
-目前**没有持久化的测试套件**。验证主要靠临时脚本，正确性依赖人工核对。优先需要覆盖的 4 个"静默出错"点：
-- 逐标的基准（新标的是否正确回补 5 年）
-- 滚动清理的幂等性与 cutoff 边界
+已有 34 个用例（见上文「✅ 测试」），并用变异测试验证了保护力。但覆盖的仍是**最容易静默出错**的那 4 处，以下尚未覆盖：
+
 - 海选失败率口径（`1 - 成功/尝试`，**不是** `1 - 保留/尝试`）
-- 信息真空期强制改写是否真的生效
+- `news_agent` 的财报日历匹配（`match_earnings` 的窗口边界）
+- `enforce_vacuum_neutral` 之外的第二层解析逻辑（`parse_llm_json` 的畸形输入）
+- `backtest.py` 的资金曲线与指标计算（`compute_metrics`）
+
+**已修复**：逐标的基准、滚动清理幂等性、ROE 披露日映射、信息真空期强制改写 —— 这 4 项均已固化为回归测试。
 
 ---
 
@@ -277,6 +316,14 @@ quant-harness/
 │   ├── factor_score.py       # 多因子打分
 │   ├── plot_heatmap.py       # 参数热力图
 │   └── quant_demo.py         # 日线抓取与绘图示例
+├── tests/                    # 零依赖测试套件（python tests/run_tests.py）
+│   ├── run_tests.py          # 入口
+│   ├── _runner.py            # 迷你测试框架（不依赖 pytest）
+│   ├── test_vacuum_neutral.py   # 信息真空期强制改写（注入测试）★
+│   ├── test_fetch_start.py      # 逐标的基准
+│   ├── test_roll_cleanup.py     # 滚动清理幂等性
+│   └── test_roe_available.py    # ROE 法定披露日映射
+├── architecture.png          # 架构图
 ├── config/                   # candidates.json / target_pool.json（脚本产物）
 ├── logs/                     # 各脚本独立日志
 └── data/quant_data.db        # SQLite（滚动的最近 5 年）
