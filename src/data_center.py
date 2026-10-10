@@ -363,10 +363,49 @@ def fetch_valuation(ak, symbol: str, start: date, end: date) -> pd.DataFrame:
     return df.sort_values("trade_date").drop_duplicates("trade_date", keep="last")
 
 
+def roe_available_from(report_period: date) -> date:
+    """把【报告期末日】换算成该财报【最迟一定已公开】的日期。
+
+    ★ 这是修复前视偏差(look-ahead bias)的核心函数 ★
+
+    问题: 报告期末日 != 数据可用日。A 股年报的报告期是 12-31, 但实际披露要到
+    次年 3~4 月。如果直接拿"报告期末日"当作"该数据从这天起可用", 回测就会在
+    1 月就"知道"了 12-31 的 ROE —— 而那份财报当时根本没公布, 这是一个静默的
+    前视偏差, 会让所有基于 ROE 的选股/回测结论失真。
+
+    做法: 采用【A 股法定披露截止日】作为保守的可用日。任何公司都必须在这个
+    日期之前披露, 所以用它当可用日可以保证"绝不使用未来信息"。
+    代价: 对提前披露的公司会略微保守(数据比实际晚用几天到几周)。
+
+    口径表(依据交易所信息披露规则):
+        一季报(报告期 03-31) -> 当年 04-30
+        中报  (报告期 06-30) -> 当年 08-31
+        三季报(报告期 09-30) -> 当年 10-31
+        年报  (报告期 12-31) -> 次年 04-30
+
+    注: 数据源(stock_financial_abstract)不提供"实际披露日期", 所以无法用精确
+    披露日; 法定截止日是可获得且足够保守的替代。若将来引入带披露日的数据源
+    (如 stock_yysj_em 的"实际披露时间"), 可换成精确值。
+    """
+    y, m = report_period.year, report_period.month
+    if m == 3:
+        return date(y, 4, 30)
+    if m == 6:
+        return date(y, 8, 31)
+    if m == 9:
+        return date(y, 10, 31)
+    if m == 12:
+        return date(y + 1, 4, 30)
+    # 非标准报告期末(理论上不会出现): 保守地往后推 4 个月, 绝不提前
+    return date(y, m, 28) + timedelta(days=120)
+
+
 def fetch_roe(ak, symbol: str, start: date, end: date) -> pd.DataFrame:
     """同花顺财务摘要: 取 ROE 序列(宽表 -> 长表)。
 
-    返回列为 report_period(报告期, date) 和 roe。只保留报告期 <= 区间末的数据。
+    返回列为 report_period(报告期末, date) / available_from(可用日, date) / roe。
+    只保留【可用日 <= 区间末】的数据 —— 用可用日而不是报告期末过滤, 否则会把
+    "还没披露的财报"提前算进来, 造成前视偏差。
     """
     raw = with_retry(ak.stock_financial_abstract, symbol=symbol, what=f"{symbol} financial_abstract")
     if raw is None or raw.empty:
@@ -395,11 +434,23 @@ def fetch_roe(ak, symbol: str, start: date, end: date) -> pd.DataFrame:
     long["report_period"] = long["report_period"].map(normalize_date)
     long["roe"] = pd.to_numeric(long["roe"], errors="coerce")
     long = long.dropna(subset=["report_period", "roe"])
-    long = long[long["report_period"] <= end]
+
+    # ★ 关键: 用"法定披露截止日"而不是"报告期末日"来判断数据何时可用
+    long["available_from"] = long["report_period"].map(roe_available_from)
+
+    # 按可用日过滤: 只保留在区间末之前【已经公开】的财报
+    before = len(long)
+    long = long[long["available_from"] <= end]
+    dropped = before - len(long)
+    if dropped > 0:
+        log.debug("  %s: %d 期财报因'截至 %s 尚未披露'被排除(前视偏差防护)",
+                  symbol, dropped, end)
 
     if long.empty:
-        raise ValueError(f"{symbol} 在 {end} 之前没有可用的 ROE 数据")
-    return long[["report_period", "roe"]].sort_values("report_period").reset_index(drop=True)
+        raise ValueError(f"{symbol} 在 {end} 之前没有【已披露】的 ROE 数据")
+    return (long[["report_period", "available_from", "roe"]]
+            .sort_values(["available_from", "report_period"])
+            .reset_index(drop=True))
 
 
 def get_fundamentals(ak, symbol: str, name: str,
@@ -423,22 +474,25 @@ def get_fundamentals(ak, symbol: str, name: str,
     df = val.sort_values("trade_date").copy()
 
     if not roe.empty:
-        # 关键: 用 merge_asof 做"按报告期向后填充", 且只取 <= 当前交易日的报告期。
-        # report_period 是报告期末(如 2025-12-31), 用它当日即可用的近似;
-        # 更严格的可用日应考虑披露滞后, 这里保持简单并把这个口径写进注释。
+        # ★ 关键修复(前视偏差): 用 available_from(法定披露截止日) 对齐, 而不是
+        # report_period(报告期末日)。用报告期末日会让回测在 1 月就"知道"12-31 的
+        # 年报 ROE, 而那份财报实际要到 4 月底才公布。
         #
         # 注意: 本地日期是 datetime.date 对象, dtype 为 object, 而 pandas 3.x 的
         # merge_asof 要求两侧都是 datetime64, 所以这里必须先显式转换。
         left = df.sort_values("trade_date").copy()
-        right = roe.sort_values("report_period").copy()
+        right = roe.sort_values("available_from").copy()
         left["_d"] = pd.to_datetime(left["trade_date"])
-        right["_d"] = pd.to_datetime(right["report_period"])
+        right["_d"] = pd.to_datetime(right["available_from"])
         df = pd.merge_asof(left, right, on="_d", direction="backward")
         df = df.drop(columns=["_d"])
-        df = df.rename(columns={"report_period": "roe_report_period"})
+        # 保留两个信息: 报告期末(供人阅读) + 可用日(审计用, 证明没有前视)
+        df = df.rename(columns={"report_period": "roe_report_period",
+                                "available_from": "roe_available_from"})
     else:
         df["roe"] = pd.NA
         df["roe_report_period"] = pd.NaT
+        df["roe_available_from"] = pd.NaT
 
     df["symbol"] = symbol
     df["name"] = name
@@ -450,7 +504,8 @@ def get_fundamentals(ak, symbol: str, name: str,
     df["fetched_at"] = now_bj().strftime("%Y-%m-%d %H:%M:%S")
 
     cols = ["symbol", "name", "asset_type", "trade_date", "pe_ttm", "pe_static",
-            "pb", "roe", "roe_report_period", "total_mv", "fetched_at"]
+            "pb", "roe", "roe_report_period", "roe_available_from", "total_mv",
+            "fetched_at"]
     df = df.dropna(subset=["trade_date"]).sort_values("trade_date")
     df = df.drop_duplicates("trade_date", keep="last")
     return df[cols].reset_index(drop=True), (" | ".join(errors) if errors else None)
@@ -489,6 +544,9 @@ CREATE TABLE fundamentals (
     pb                REAL,
     roe               REAL,
     roe_report_period DATE,
+    -- ROE 的【可用日】(法定披露截止日)。前视偏差防护的依据:
+    -- 只有 trade_date >= roe_available_from 时, 这个 ROE 才是当时真实可得的。
+    roe_available_from DATE,
     total_mv          REAL,
     fetched_at        TEXT,
     PRIMARY KEY (symbol, trade_date)
@@ -516,6 +574,59 @@ def rebuild_tables(conn: sqlite3.Connection) -> None:
     log.info("已重建表: daily_price, fundamentals")
 
 
+# 旧库缺少的列 -> 需要补上的 DDL。用于把"以前建的库"平滑升级到新 schema,
+# 免得用户为了一个新增列必须重跑一次全量建库(几分钟到几十分钟)。
+_COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
+    "fundamentals": {
+        # ROE 可用日(法定披露截止日)。见 roe_available_from() 的说明。
+        "roe_available_from": "DATE",
+    },
+}
+
+
+def known_symbols(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
+    """取出数据库里【所有已知标的】的 (代码, 名称, 类型)。
+
+    为什么需要这个: 原先 --update 只迭代硬编码的 UNIVERSE(5 只), 而库里可能已经
+    通过 --symbol / --pool 累积了更多标的。那些标的永远不会被增量更新, 也没有任何
+    提示 —— 表现为"某只股票的数据一直停在过去某一天"。
+    实测踩过: 库里 11 只标的, --update 只刷新 5 只, 其余 6 只静默冻结在 2026-09-30。
+
+    名称优先取库里已有记录, 这样不必依赖调用方传名字。
+    """
+    if not table_exists(conn, "daily_price"):
+        return []
+    rows = conn.execute(
+        "SELECT symbol, MAX(name), MAX(asset_type) FROM daily_price "
+        "GROUP BY symbol ORDER BY symbol").fetchall()
+    out: list[tuple[str, str, str]] = []
+    for sym, nm, at in rows:
+        if not sym:
+            continue
+        kind = at or ("etf" if str(sym).startswith(("5", "1")) else "stock")
+        out.append((str(sym), nm or str(sym), kind))
+    return out
+
+
+def migrate_schema(conn: sqlite3.Connection) -> list[str]:
+    """给已存在的旧库补上缺失的列(幂等)。返回本次实际补了哪些列。"""
+    added: list[str] = []
+    for table, cols in _COLUMN_MIGRATIONS.items():
+        if not table_exists(conn, table):
+            continue
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for col, coltype in cols.items():
+            if col in existing:
+                continue
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+            added.append(f"{table}.{col}")
+    if added:
+        conn.commit()
+        log.info("数据库 schema 已升级, 新增列: %s", ", ".join(added))
+        log.info("  这些列对老数据为空, 重跑对应标的的 --symbol/--pool 即可回填")
+    return added
+
+
 def write_price(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
     if df is None or df.empty:
         return 0
@@ -529,9 +640,13 @@ def write_fundamentals(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
         return 0
     # sqlite3 不认识 NaT, 统一转成 None, 否则写入会报错
     out = df.copy()
-    out["roe_report_period"] = out["roe_report_period"].map(
-        lambda v: v.strftime("%Y-%m-%d") if isinstance(v, (date, datetime)) and not pd.isna(v) else None
-    )
+    for col in ("roe_report_period", "roe_available_from"):
+        if col not in out.columns:
+            out[col] = None
+        out[col] = out[col].map(
+            lambda v: v.strftime("%Y-%m-%d")
+            if isinstance(v, (date, datetime)) and not pd.isna(v) else None
+        )
     out.to_sql("fundamentals", conn, if_exists="append", index=False)
     conn.commit()
     return len(out)
@@ -596,21 +711,25 @@ def replace_fundamental_rows_in(conn: sqlite3.Connection, df: pd.DataFrame) -> i
         return 0
     out = df.copy()
     # sqlite3 不认识 NaT/date, 统一转字符串或 None
-    out["roe_report_period"] = out["roe_report_period"].map(
-        lambda v: v.strftime("%Y-%m-%d")
-        if isinstance(v, (date, datetime)) and not pd.isna(v) else None)
+    for col in ("roe_report_period", "roe_available_from"):
+        if col not in out.columns:
+            out[col] = None
+        out[col] = out[col].map(
+            lambda v: v.strftime("%Y-%m-%d")
+            if isinstance(v, (date, datetime)) and not pd.isna(v) else None)
     out["trade_date"] = out["trade_date"].map(
         lambda v: v.strftime("%Y-%m-%d")
         if isinstance(v, (date, datetime)) and not pd.isna(v) else None)
     sql = """
     INSERT OR REPLACE INTO fundamentals
       (symbol, name, asset_type, trade_date, pe_ttm, pe_static, pb, roe,
-       roe_report_period, total_mv, fetched_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+       roe_report_period, roe_available_from, total_mv, fetched_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     """
     rows = [
         (r.symbol, r.name, r.asset_type, r.trade_date, r.pe_ttm, r.pe_static,
-         r.pb, r.roe, r.roe_report_period, r.total_mv, r.fetched_at)
+         r.pb, r.roe, r.roe_report_period, r.roe_available_from, r.total_mv,
+         r.fetched_at)
         for r in out.itertuples(index=False)
     ]
     conn.executemany(sql, rows)
@@ -780,6 +899,9 @@ def _backfill_universe(ak, conn: sqlite3.Connection, targets, history_years: int
         log.warning("daily_price 表不存在, %s 无从进行。", mode_label)
         log.warning("请先执行一次全量建库: python src/data_center.py")
         return 0
+
+    # 老库平滑升级: 补上新增列(如 roe_available_from), 免得为一个新列重跑全量
+    migrate_schema(conn)
 
     # ---- 逐标的算缺口 ----
     # plan 元素: (symbol, name, asset_type, fetch_start, is_new, existing_last)
@@ -957,13 +1079,27 @@ def _backfill_universe(ak, conn: sqlite3.Connection, targets, history_years: int
 
 def run_update(ak, conn: sqlite3.Connection, history_years: int,
                dry_run: bool = False) -> int:
-    """--update: 对内置 UNIVERSE 做增量更新 + 滚动清理。
+    """--update: 对【数据库中所有已知标的】做增量更新 + 滚动清理。
+
+    为什么不是只更新内置 UNIVERSE:
+        库里可能已经通过 --symbol / --pool 累积了更多标的。若只更新那 5 只, 其余
+        标的会静默冻结在旧日期, 且没有任何提示(实测踩过: 11 只里只更新 5 只,
+        510300 因此长期停在 2026-09-30)。这里改为覆盖全库, 与"数据库只保留最近
+        N 年"的滚动窗口语义一致。
 
     非交易日/无新数据时优雅退出(return 0), 这是需求里的硬约束。
-    实际逻辑已抽到 _backfill_universe, 与 --pool/--symbol 共用同一套逐标的基准。
     """
+    targets = known_symbols(conn)
+    if targets:
+        log.info("增量更新范围为【库内全部 %d 只标的】: %s",
+                 len(targets), ", ".join(t[0] for t in targets))
+    else:
+        # 库里还没有任何标的(首次使用): 回退到内置 UNIVERSE
+        targets = list(UNIVERSE)
+        log.info("库内暂无标的, 回退到内置 UNIVERSE(%d 只)", len(targets))
+
     return _backfill_universe(
-        ak, conn, list(UNIVERSE), history_years, dry_run=dry_run,
+        ak, conn, targets, history_years, dry_run=dry_run,
         mode_label="增量更新", require_new_rows=True, require_existing_db=True)
 
 
@@ -981,6 +1117,77 @@ def run_backfill(ak, conn: sqlite3.Connection, targets, history_years: int,
         ak, conn, targets, history_years, dry_run=dry_run,
         mode_label=f"补齐模式({source_label})",
         require_new_rows=False, require_existing_db=False)
+def run_fundamentals_refresh(ak, conn: sqlite3.Connection, targets,
+                             history_years: int, source_label: str,
+                             dry_run: bool = False) -> int:
+    """强制重刷基本面历史(不被"缺口判断"挡住)。
+
+    什么时候需要它: 基本面的【口径】变了(例如新增 roe_available_from、改用 TTM ROE),
+    但行情没有缺口。此时 --symbol 只会拉新数据, 不会重算已入库的老行, 于是老行
+    永远保留旧口径 —— 表现为"新列是空的"。
+
+    做法: 对每个目标标的, 拉最近 history_years 年的 PE/PB 与 ROE, 用
+    INSERT OR REPLACE 覆盖同 (symbol, trade_date) 的行。行情表不动。
+    """
+    today = now_bj().date()
+    try:
+        start = (now_bj() - pd.DateOffset(years=history_years)).date()
+    except Exception:
+        start = today - timedelta(days=365 * history_years)
+
+    log.info("=" * 68)
+    log.info("基本面重刷模式 | 目标 %s | 区间 %s ~ %s",
+             source_label, start, today)
+    log.info("  用途: 基本面口径变更后重算历史行(行情表不动)")
+    log.info("=" * 68)
+
+    total, failures, touched = 0, [], 0
+    for idx, (symbol, name, asset_type) in enumerate(targets, 1):
+        if asset_type != "stock":
+            log.info("[%d/%d] %s %s -> ETF 无基本面, 跳过",
+                     idx, len(targets), symbol, name)
+            continue
+        log.info("[%d/%d] %s %s 重刷中...", idx, len(targets), symbol, name)
+        try:
+            fdf, ferr = get_fundamentals(ak, symbol, name, start, today)
+        except Exception as exc:
+            fdf, ferr = None, f"{type(exc).__name__}: {exc}"
+        if fdf is None:
+            log.error("  失败: %s", ferr)
+            failures.append(f"{symbol}: {ferr}")
+            continue
+
+        n = len(fdf)
+        n_roe = int(fdf["roe"].notna().sum())
+        n_avail = int(fdf["roe_available_from"].notna().sum()) \
+            if "roe_available_from" in fdf.columns else 0
+        log.info("  拉到 %d 行, ROE 非空 %d, 可用日非空 %d", n, n_roe, n_avail)
+
+        if dry_run:
+            log.info("  dry-run: 不写库")
+        else:
+            try:
+                total += replace_fundamental_rows_in(conn, fdf)
+                touched += 1
+            except sqlite3.Error as exc:
+                log.error("  写库失败: %s", exc)
+                failures.append(f"{symbol}: 写库 {exc}")
+        time.sleep(REQUEST_INTERVAL)
+
+    # 重刷后同样做滚动清理, 保持"只有最近 N 年"的不变式
+    if not dry_run:
+        cutoff_str, d1, d2 = rolling_cleanup(conn, history_years)
+        log.info("滚动清理: 删除 trade_date < %s 的数据 "
+                 "(daily_price %d 行, fundamentals %d 行)", cutoff_str, d1, d2)
+
+    log.info("=" * 68)
+    log.info("基本面重刷完成: 写入 %d 行 | 成功标的 %d | 失败 %d",
+             total, touched, len(failures))
+    for f in failures:
+        log.error("失败: %s", f)
+    log.info("=" * 68)
+    return 0 if (total or dry_run) else 1
+
 
 def verify_db(db_path: str = DB_FILE) -> None:
     """回读数据库做个自检, 把概要和口径打到日志里。"""
@@ -1041,6 +1248,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         "绝不 DROP 重建")
     p.add_argument("--symbol", default=None,
                    help="只拉取指定的单只股票, 例如 --symbol 600418(同样走补齐模式)")
+
+    # ---- 基本面重刷(口径变更后回填历史行) ----
+    p.add_argument("--rebuild-fundamentals", action="store_true",
+                   help="强制重刷基本面历史(配合 --symbol/--pool/--update 使用)。"
+                        "用于基本面口径变更后回填已入库的老行, 行情表不动")
 
     # ---- 全量模式的日期(不传 --update 时生效) ----
     p.add_argument("--start", default=CFG_START_DATE,
@@ -1103,6 +1315,39 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError:
         log.error("未安装 akshare, 请执行: pip install akshare")
         return 1
+
+    # ---- 基本面重刷(--rebuild-fundamentals): 优先级最高, 因为它是对已有行的修正 ----
+    # 支持三种目标来源: --update(全库已知标的) / --pool / --symbol(或都不传=内置)
+    if args.rebuild_fundamentals:
+        if args.update:
+            targets = known_symbols(conn_probe := connect(args.db)) or list(UNIVERSE)
+            try:
+                conn_probe.close()
+            except Exception:
+                pass
+            universe_label = f"库内已知标的({len(targets)} 只)"
+        elif not is_backfill:
+            targets = list(UNIVERSE)
+            universe_label = f"内置 UNIVERSE({len(targets)} 只)"
+        try:
+            conn = connect(args.db)
+        except sqlite3.Error as exc:
+            log.error("无法打开数据库 %s: %s", args.db, exc)
+            return 1
+        try:
+            migrate_schema(conn)
+            return run_fundamentals_refresh(ak, conn, targets, args.history_years,
+                                            universe_label, dry_run=args.dry_run)
+        except sqlite3.Error as exc:
+            log.error("基本面重刷时数据库出错: %s", exc)
+            return 1
+        except Exception as exc:
+            log.error("基本面重刷失败: %s: %s", type(exc).__name__, exc)
+            import traceback
+            traceback.print_exc()
+            return 1
+        finally:
+            conn.close()
 
     # ---- 补齐模式(--symbol / --pool) ----
     if is_backfill:
