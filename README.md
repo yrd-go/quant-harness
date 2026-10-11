@@ -321,7 +321,7 @@ A 股最小交易单位是 100 股，所以每只股票有个"一手门槛"。�
 ## ✅ 测试
 
 ```bash
-python tests/run_tests.py          # 全部 75 个用例
+python tests/run_tests.py          # 全部 77 个用例
 python tests/run_tests.py -q       # 只看汇总
 python tests/run_tests.py vacuum   # 只跑名字含 vacuum 的
 ```
@@ -338,7 +338,7 @@ python tests/run_tests.py vacuum   # 只跑名字含 vacuum 的
 | `test_fetch_start.py` | 逐标的基准（新标的回补 5 年 / 老标的 +1 天）| 6 |
 | `test_roll_cleanup.py` | 滚动清理幂等性与 cutoff 边界 | 8 |
 | `test_vacuum_neutral.py` | **信息真空期强制改写（注入测试）** | 12 |
-| `test_paper_broker.py` | 手续费/滑点/整手/现金约束/撮合/估值/一手门槛 | 41 |
+| `test_paper_broker.py` | 手续费/滑点/整手/现金约束/撮合/估值/一手门槛/净值去重 | 43 |
 
 ### 测试的有效性经过验证（变异测试）
 
@@ -405,7 +405,7 @@ python tests/run_tests.py vacuum   # 只跑名字含 vacuum 的
 
 ### 5. 测试覆盖仍不完整
 
-已有 75 个用例（见上文「✅ 测试」），并用变异测试验证了保护力。但覆盖的仍是**最容易静默出错**的那几处，以下尚未覆盖：
+已有 77 个用例（见上文「✅ 测试」），并用变异测试验证了保护力。但覆盖的仍是**最容易静默出错**的那几处，以下尚未覆盖：
 
 - 海选失败率口径（`1 - 成功/尝试`，**不是** `1 - 保留/尝试`）
 - `news_agent` 的财报日历匹配（`match_earnings` 的窗口边界）

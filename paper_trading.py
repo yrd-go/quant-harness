@@ -154,10 +154,41 @@ def load_target_pool() -> list[dict]:
 # --------------------------------------------------------------------------- #
 # 持久化
 # --------------------------------------------------------------------------- #
-def _append_csv(path: Path, rows: list[dict], fields: list[str]) -> None:
+def _append_csv(path: Path, rows: list[dict], fields: list[str],
+                key: str | None = None) -> None:
+    """追加 CSV 行。
+
+    key 不为空时按该列【去重】: 同一个 key 只保留最新一条 ——
+    净值曲线是时序数据, 一天应当只有一条记录。
+    不做去重的话, 同一天跑多次 --daily 就会堆出重复行,
+    文件持续膨胀, 而且要靠消费端(--report)去重来掩盖生产端的数据错误。
+    """
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    if key:
+        existing = read_csv(path)
+        order: list[str] = []
+        by_key: dict[str, dict] = {}
+        for r in existing:
+            k = r.get(key, "")
+            if k not in by_key:
+                order.append(k)
+            by_key[k] = r            # 后出现的覆盖先出现的
+        for r in rows:
+            k = str(r.get(key, ""))
+            if k not in by_key:
+                order.append(k)
+            by_key[k] = r
+        out = [by_key[k] for k in order]
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+            w.writeheader()
+            for r in out:
+                w.writerow(r)
+        return
+
     new = not path.exists()
     with open(path, "a", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
@@ -352,7 +383,8 @@ def cmd_daily(dry_run: bool = False) -> int:
                 "date": today, "equity": round(equity, 2),
                 "cash": round(acct.cash, 2), "market_value": round(mv, 2),
                 "positions": len(acct.positions),
-            }], ["date", "equity", "cash", "market_value", "positions"])
+            }], ["date", "equity", "cash", "market_value", "positions"],
+                key="date")   # ★ 按日期去重: 同一天跑多次只保留最新一条
             log.info("已保存账户 / 净值 / 挂单")
 
     finally:

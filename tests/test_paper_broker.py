@@ -431,6 +431,59 @@ def t_affordable_empty():
     assert pb.affordable_at_capital({}, {}, 10_000) == ([], [])
 
 
+@test("★ 净值曲线去重: 同一天写多次只保留最新一条")
+def t_equity_dedup():
+    """净值是时序数据, 一天只能有一条。
+
+    不做去重的话, 同一天跑多次 --daily 就会堆出重复行 ——
+    文件持续膨胀, 而且要靠 --report 去重来掩盖生产端的错误。
+    """
+    import paper_trading as pt
+    from pathlib import Path
+
+    d = Path(".tmp_test_equity")
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / "eq.csv"
+    fields = ["date", "equity"]
+    try:
+        pt._append_csv(f, [{"date": "2026-10-09", "equity": 100000}], fields,
+                       key="date")
+        pt._append_csv(f, [{"date": "2026-10-09", "equity": 101000}], fields,
+                       key="date")
+        pt._append_csv(f, [{"date": "2026-10-10", "equity": 102000}], fields,
+                       key="date")
+        rows = pt.read_csv(f)
+        assert len(rows) == 2, f"应有 2 行(两个日期), 实际 {len(rows)}: {rows}"
+        got = {r["date"]: float(r["equity"]) for r in rows}
+        assert got["2026-10-09"] == 101000, \
+            f"同一天应保留最新值 101000, 实际 {got['2026-10-09']}"
+        assert got["2026-10-10"] == 102000
+        # 日期顺序保持首次出现的顺序
+        assert [r["date"] for r in rows] == ["2026-10-09", "2026-10-10"]
+    finally:
+        for p in d.glob("*"):
+            p.unlink(missing_ok=True)
+        d.rmdir()
+
+
+@test("CSV 不去重时保持追加行为(key=None)")
+def t_csv_append_mode():
+    import paper_trading as pt
+    from pathlib import Path
+
+    d = Path(".tmp_test_append")
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / "t.csv"
+    try:
+        pt._append_csv(f, [{"a": "1"}, {"a": "1"}], ["a"])
+        rows = pt.read_csv(f)
+        assert len(rows) == 2, f"追加模式应保留 2 行, 实际 {len(rows)}"
+    finally:
+        for p in d.glob("*"):
+            p.unlink(missing_ok=True)
+        d.rmdir()
+
+
 # --------------------------------------------------------------------------- #
 # 序列化
 # --------------------------------------------------------------------------- #
