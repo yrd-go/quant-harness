@@ -485,6 +485,92 @@ def t_csv_append_mode():
 
 
 # --------------------------------------------------------------------------- #
+# 方案 A: 一手门槛过滤 + 权重重分配
+#
+# 注意: 测试数据必须用【合法的 6 位数字代码】。
+# 我一开始用了 "cheap"/"rich" 这种假符号, 但 zfill(6) 会把它们变成
+# "0cheap"/"00rich" —— 而 target_weights 内部按 6 位数字代码处理,
+# 导致价格查不到、全部被排除, 测试全红。是测试数据错, 不是实现错。
+# --------------------------------------------------------------------------- #
+@test("★ 方案A: 买不起的标的被排除, 权重重新分配给买得起的")
+def t_capital_aware_exclude():
+    pool = [{"symbol": "000001", "decision": "neutral"},
+            {"symbol": "600519", "decision": "neutral"}]
+    px = {"000001": 10.0, "600519": 500.0}      # 一手 1000 vs 50000
+    # 本金 10000: 2 只等权每只 5000 -> 600519 买不起 -> 排除
+    w = pb.target_weights(pool, prices=px, capital=10_000)
+    assert "000001" in w, "买得起的应保留"
+    assert "600519" not in w, "买不起的应被排除"
+    assert abs(w["000001"] - 1.0) < 1e-9, \
+        f"权重应【重新分配】给买得起的(独占 100%), 实际 {w['000001']}"
+
+
+@test("★ 方案A: 本金充足时不做排除(权重不受影响)")
+def t_capital_aware_no_exclude():
+    pool = [{"symbol": "000001", "decision": "neutral"},
+            {"symbol": "600519", "decision": "neutral"}]
+    px = {"000001": 10.0, "600519": 20.0}
+    w = pb.target_weights(pool, prices=px, capital=1_000_000)
+    assert len(w) == 2, f"本金充足应都保留, 实际 {list(w)}"
+    assert abs(w["000001"] - 0.5) < 1e-9
+    assert abs(w["600519"] - 0.5) < 1e-9
+
+
+@test("方案A: 不给 prices/capital 时行为与以前一致(向后兼容)")
+def t_capital_aware_optional():
+    pool = [{"symbol": "000001", "decision": "neutral"},
+            {"symbol": "600519", "decision": "neutral"}]
+    w = pb.target_weights(pool)
+    assert len(w) == 2, "没给价格信息时不该做任何排除"
+    assert abs(w["000001"] - 0.5) < 1e-9
+
+
+@test("方案A: return_meta 能拿到排除明细")
+def t_capital_aware_meta():
+    pool = [{"symbol": "000001", "decision": "neutral"},
+            {"symbol": "600519", "decision": "neutral"},
+            {"symbol": "000002", "decision": "cautioned"}]
+    px = {"000001": 10.0, "600519": 500.0}
+    w, meta = pb.target_weights(pool, prices=px, capital=10_000, return_meta=True)
+    assert "600519" in meta["excluded_lot"], f"excluded_lot={meta['excluded_lot']}"
+    assert "000002" in meta["excluded_guard"], f"excluded_guard={meta['excluded_guard']}"
+    assert meta["affordable"] == ["000001"], f"affordable={meta['affordable']}"
+
+
+@test("★ 方案A: 全部买不起时返回空(不乱买)")
+def t_capital_aware_all_excluded():
+    pool = [{"symbol": "600519", "decision": "neutral"}]
+    px = {"600519": 500.0}          # 一手 50000
+    w = pb.target_weights(pool, prices=px, capital=1_000)
+    assert w == {}, f"1 千本金买不起一手 5 万, 应空仓, 实际 {w}"
+
+
+@test("★ 方案A: 排除是收敛的, 且选中的都买得起")
+def t_capital_aware_converges():
+    # 20 只, 价格递增; 本金 5 万
+    pool = [{"symbol": f"{600000 + i}", "decision": "neutral"} for i in range(20)]
+    px = {f"{600000 + i}": 1.0 + i * 5 for i in range(20)}   # 1 元到 96 元
+    w = pb.target_weights(pool, prices=px, capital=50_000)
+    assert len(w) > 0, "应能选出一部分"
+    assert len(w) < 20, f"高价的不该全进来, 实际选中 {len(w)} 只"
+    n = len(w)
+    for s in w:
+        assert 50_000 / n >= px[s] * pb.LOT_SIZE - 1e-9, \
+            f"{s} 被选中但买不起: 预算 {50_000 / n:.0f} < 一手 {px[s] * 100:.0f}"
+    assert abs(sum(w.values()) - 1.0) < 1e-9, "权重和应为 1(资金不闲置)"
+
+
+@test("方案A: 无价格的标的被排除(无法判断是否买得起)")
+def t_capital_aware_no_price():
+    pool = [{"symbol": "000001", "decision": "neutral"},
+            {"symbol": "000002", "decision": "neutral"}]
+    px = {"000001": 10.0}          # 000002 没有价格
+    w = pb.target_weights(pool, prices=px, capital=100_000)
+    assert "000002" not in w, "无价格的应被排除(保守不建仓)"
+    assert "000001" in w
+
+
+# --------------------------------------------------------------------------- #
 # 序列化
 # --------------------------------------------------------------------------- #
 @test("账户: 存盘后读回, 状态完全一致")

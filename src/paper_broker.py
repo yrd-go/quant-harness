@@ -136,37 +136,100 @@ def round_lot(shares: float) -> int:
 # --------------------------------------------------------------------------- #
 # 目标权重
 # --------------------------------------------------------------------------- #
-def target_weights(pool: list[dict], policy: str = "equal_weight") -> dict[str, float]:
+def target_weights(pool: list[dict], policy: str = "equal_weight",
+                   prices: dict[str, float] | None = None,
+                   capital: float | None = None,
+                   return_meta: bool = False):
     """把目标池转成目标权重。
 
     ★ 这里把前两层做的【防幻觉护栏】变成真正的风控 ★
 
-    规则(与 news_agent 的 decision 语义对应):
-      - decision == "cautioned"      -> 权重 0(财报雷区, 不持有)
-      - information_vacuum is True   -> 权重 0(信息真空期, 无依据不建仓)
-      - 其余                          -> 等权分配
+    过滤规则(与 news_agent 的 decision 语义对应):
+      1. decision == "cautioned"      -> 权重 0(财报雷区, 不持有)
+      2. information_vacuum is True   -> 权重 0(信息真空期, 无依据不建仓)
+      3. 买不起一手(需给 prices + capital) -> 权重 0, 且【权重重新分配】给买得起的
 
-    如果这里不拦, 那 news_agent 里那套护栏就只是 UI 上的一个图标,
-    不产生任何实际风控效果 —— 那是自欺欺人。
+    关于第 3 条(方案 A):
+      A 股最小交易单位 100 股, 所以每只股票有个"一手门槛"。如果某只的一手成本
+      超过它应得的预算, 它就买不进来。此时有两种处理:
+        (a) 丢弃它, 权重【重新分配】给买得起的标的(本金全部用上)
+        (b) 丢弃它, 权重【不重分配】(导致资金闲置)
+      这里选 (a): 排除高价股后按新的只数重新等权。否则 10 万本金只买 8 只、
+      却有 1/3 现金闲置在账上, 实际仓位远低于目标。
+
+    注意: 排除是【有偏的】—— 被丢掉的系统性全是高价股, 组合会偏向低价股。
+    这是资金量不足时的必然代价, 不是本函数能消除的; 用 --capital-hint 可以
+    看清"要装下全部需要多少本金"。
+
+    return_meta=True 时返回 (weights, meta), meta 含 excluded/affordable 明细。
     """
     if policy != "equal_weight":
         raise ValueError(f"暂不支持的仓位策略: {policy!r}")
 
-    eligible = []
+    # ---- 第 1、2 道过滤: 护栏 ----
+    eligible: list[str] = []
+    excluded_guard: list[str] = []
     for item in pool:
         sym = str(item.get("symbol", "")).zfill(6)
         if not sym or sym == "000000":
             continue
         if str(item.get("decision", "")).strip().lower() == "cautioned":
+            excluded_guard.append(sym)
             continue
         if item.get("information_vacuum"):
+            excluded_guard.append(sym)
             continue
         eligible.append(sym)
 
-    if not eligible:
-        return {}
-    w = 1.0 / len(eligible)
-    return {s: w for s in eligible}
+    # ---- 第 3 道过滤: 一手门槛(只在给了 prices + capital 时启用) ----
+    excluded_lot: list[str] = []
+    affordable: list[str] = list(eligible)
+    if prices is not None and capital is not None and capital > 0 and eligible:
+        affordable = _filter_affordable(eligible, prices, capital)
+        excluded_lot = [s for s in eligible if s not in set(affordable)]
+
+    if not affordable:
+        result: dict[str, float] = {}
+        if not return_meta:
+            return result
+        return result, {"eligible": eligible, "excluded_guard": excluded_guard,
+                        "excluded_lot": excluded_lot, "affordable": [],
+                        "per_stock_budget": 0.0}
+
+    w = 1.0 / len(affordable)          # ★ 权重重新分配: 买得起的平分全部
+    result = {s: w for s in affordable}
+
+    if not return_meta:
+        return result
+    return result, {
+        "eligible": eligible,
+        "excluded_guard": excluded_guard,
+        "excluded_lot": excluded_lot,
+        "affordable": affordable,
+        "per_stock_budget": capital / len(affordable) if capital else 0.0,
+    }
+
+
+def _filter_affordable(symbols: list[str], prices: dict[str, float],
+                       capital: float) -> list[str]:
+    """从候选里筛出"买得起一手"的。
+
+    按一手成本【从便宜到贵】逐个纳入: 每纳入一只, 只数 n 增加 -> 每只预算
+    capital/n 下降。所以越往后越难通过, 天然收敛(不需要额外迭代)。
+
+    没有价格的标的【排除】—— 无法判断是否买得起, 保守起见不建仓
+    (plan_orders 也会因为缺价格而跳过它们)。
+    """
+    ranked = sorted(
+        (s for s in symbols if prices.get(s, 0) > 0),
+        key=lambda s: prices[s] * LOT_SIZE)
+    kept: list[str] = []
+    for s in ranked:
+        trial = kept + [s]
+        n = len(trial)
+        if capital / n >= max(prices[x] * LOT_SIZE for x in trial):
+            kept = trial
+    return kept
 
 
 def min_capital_required(weights: dict[str, float],

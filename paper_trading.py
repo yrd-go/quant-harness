@@ -322,40 +322,48 @@ def cmd_daily(dry_run: bool = False) -> int:
 
         # ---------------- ③ 生成下一交易日的订单 ----------------
         pool = load_target_pool()
-        weights = pb.target_weights(pool, POSITION_POLICY)
-        excluded = len(pool) - len(weights)
-        log.info("目标池 %d 只 -> 目标权重 %d 只 (排除 %d 只: cautioned/信息真空期)",
-                 len(pool), len(weights), excluded)
 
-        # 生成订单要用"今日收盘价"估算, 但成交在"次日开盘"
-        order_syms = list(set(weights) | set(acct.positions))
-        close_px = load_prices(conn, order_syms, today, "close")
+        # 先把候选池的价格读出来 —— 目标权重需要它来判断"买不买得起"
+        pool_syms = [str(p.get("symbol", "")).zfill(6) for p in pool]
+        pool_syms = [s for s in pool_syms if s and s != "000000"]
+        close_px = load_prices(conn, pool_syms, today, "close")
 
-        # ---- 一手门槛检查: 本金不够时, 有些标的根本买不进来 ----
-        # 不做这一步的话, 它们会被 plan_orders 静默丢弃, 你以为在建 15 只组合,
-        # 实际只建了 10 只 —— 而且丢的全是高价股, 组合会系统性偏向低价股。
-        info = pb.min_capital_required(weights, close_px)
-        if info["n"]:
-            per_budget = equity / info["n"]
-            unaff = [s for s in weights
-                     if close_px.get(s, 0) * pb.LOT_SIZE > per_budget]
-            if unaff:
-                log.warning("-" * 68)
-                log.warning("⚠ 一手门槛: 有 %d 只标的【买不起一手】, 本次不会建仓",
-                            len(unaff))
-                for s in sorted(unaff, key=lambda x: -close_px.get(x, 0)):
-                    lot = close_px.get(s, 0) * pb.LOT_SIZE
-                    log.warning("    %s  股价 %.2f  一手 %.0f 元  超出每只预算 %.0f 元 %.0f%%",
-                                s, close_px.get(s, 0), lot, per_budget,
-                                (lot / per_budget - 1) * 100)
-                log.warning("  当前本金 %.0f 元, 等权每只预算 %.0f 元", equity, per_budget)
-                log.warning("  要让这 %d 只都买得起, 建议本金 >= %.0f 元 (%.1f 万)",
+        # ★ 方案 A: 排除买不起一手的, 并把权重【重新分配】给买得起的 ★
+        # 用"结算日总资产"而不是初始资金 —— 账户涨跌后, 可负担范围会变
+        weights, wmeta = pb.target_weights(
+            pool, POSITION_POLICY, prices=close_px, capital=equity,
+            return_meta=True)
+
+        n_guard = len(wmeta["excluded_guard"])
+        n_lot = len(wmeta["excluded_lot"])
+        log.info("目标池 %d 只 -> 目标权重 %d 只 (护栏排除 %d, 一手门槛排除 %d)",
+                 len(pool), len(weights), n_guard, n_lot)
+
+        if n_lot:
+            per = wmeta["per_stock_budget"]
+            log.warning("-" * 68)
+            log.warning("⚠ 一手门槛: %d 只买不起一手, 已从组合中排除", n_lot)
+            for s in sorted(wmeta["excluded_lot"], key=lambda x: -close_px.get(x, 0)):
+                lot = close_px.get(s, 0) * pb.LOT_SIZE
+                log.warning("    %s  股价 %.2f  一手 %.0f 元  (新预算 %.0f 元, 仍超 %.0f%%)",
+                            s, close_px.get(s, 0), lot, per,
+                            (lot / per - 1) * 100 if per else 0)
+            log.warning("  被排除的权重已【重新分配】给其余 %d 只, 每只预算 %.0f 元",
+                        len(weights), per)
+            log.warning("  这样本金能更充分地用上(旧做法保留原预算, 会闲置大量现金)")
+            log.warning("  注: 实际投入仍可能低于总资产 —— 100 股整手的取整会留下零头")
+            info = pb.min_capital_required({s: 1.0 for s in pool_syms}, close_px)
+            if info["n"]:
+                log.warning("  要让全部 %d 只都持有, 建议本金 >= %.0f 元 (%.1f 万)",
                             info["n"], info["recommended"], info["recommended"] / 10000)
-                log.warning("  否则组合只会有 %d 只, 且系统性偏向低价股",
-                            info["n"] - len(unaff))
-                log.warning("-" * 68)
+            log.warning("  注意: 排除是【有偏的】—— 丢的全是高价股, 组合偏向低价股")
+            log.warning("-" * 68)
 
-        orders = pb.plan_orders(acct, weights, close_px, equity)
+        # 订单涉及的标的 = 有权重的 + 已持仓的(用于生成卖出单)
+        order_syms = list(set(weights) | set(acct.positions))
+        close_px_order = load_prices(conn, order_syms, today, "close")
+
+        orders = pb.plan_orders(acct, weights, close_px_order, equity)
         real = [o for o in orders if o["side"] in ("buy", "sell")]
 
         if real:
