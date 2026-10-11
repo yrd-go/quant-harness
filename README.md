@@ -190,6 +190,45 @@ python src/data_center.py
 streamlit run app.py
 ```
 
+### Docker 部署（可选）
+
+不想在宿主机装 Python / akshare / backtrader，可以用容器：
+
+```bash
+# 构建（Python 3.12-slim，自动装依赖、设时区、建运行时目录）
+docker build -t quant-harness .
+
+# 启动前端 → http://localhost:8501
+docker run --rm -p 8501:8501 --env-file .env \
+  -v ./data:/app/data -v ./logs:/app/logs -v ./config:/app/config \
+  quant-harness
+
+# 跑一次每日流水线（跑完退出，适合配宿主机定时任务）
+docker run --rm --env-file .env \
+  -v ./data:/app/data -v ./logs:/app/logs -v ./config:/app/config \
+  quant-harness python run_daily.py
+```
+
+**用 `docker compose` 更省事**（volume / env / 端口写一次就固定）：
+
+```bash
+docker compose up -d            # 启动前端
+docker compose logs -f          # 看日志
+docker compose down             # 停止
+docker compose run --rm daily   # 手动跑一次流水线
+docker compose run --rm report  # 出纸面跟踪报告
+```
+
+**三个容器化的关键点**（都在文件里注释了）：
+
+| 点 | 为什么 |
+|---|---|
+| `TZ=Asia/Shanghai` + 装 `tzdata` | 项目强依赖北京时间；容器默认 UTC 会让"今天"判断错一天 |
+| `PYTHONUTF8=1` | 项目中文输出很多，C locale 下会变乱码（和 Windows 下同一个坑）|
+| **`data/` `logs/` `config/` 必须挂载** | 不挂的话容器一删，五年历史数据和纸面账户全丢 —— 最容易踩的坑 |
+
+> ⚠️ **本配置尚未实机验证**（开发机未安装 Docker）。首次 `docker build` 若失败，最可能的原因是 akshare / backtrader 在 Linux 上编译缺系统库，需在 Dockerfile 的 `apt-get install` 里补 `gcc`（或改用预编译 wheel）。
+
 ### 数据层三种模式
 
 ```bash

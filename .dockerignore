@@ -1,0 +1,61 @@
+# ============================================================
+# .dockerignore —— 告诉 docker 哪些文件【不要】进构建上下文
+#
+# 为什么需要它:
+#   构建镜像时 docker 会把整个目录打包发给 daemon。不加排除的话:
+#     - .venv-quant/ 有几百 MB, 而且里面是 Windows 的二进制, 在 Linux 镜像里没用
+#     - data/ 里有 SQLite 数据库, 不该打进镜像(应该用 volume 挂载)
+#     - .git/ 有完整历史, 让镜像白胖几十 MB
+#   实测: 项目目录约 XXX MB, 排除后构建上下文只有几 MB
+# ============================================================
+
+# ---- 虚拟环境(最关键: Windows 二进制在 Linux 镜像里完全无用) ----
+.venv-quant/
+.venv/
+venv/
+env/
+
+# ---- 版本控制 ----
+.git/
+.gitignore
+.gitattributes
+
+# ---- 运行时数据(应通过 volume 挂载, 不打进镜像) ----
+data/
+logs/
+output/
+.tmp/
+.mplconfig/
+
+# ---- 脚本产物(容器内会重新生成) ----
+config/*.json
+
+# ---- Python 缓存 ----
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 密钥(绝对不能进镜像!) ----
+.env
+.env.*
+
+# ---- 文档与图片(运行时不需要) ----
+docs/
+*.md
+!requirements.txt
+
+# ---- IDE / 操作系统 ----
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 临时/备份 ----
+*.bak
+*.log

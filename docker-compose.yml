@@ -1,0 +1,61 @@
+# ============================================================
+# docker-compose.yml —— 一条命令管理两个用途
+#
+# 用法:
+#   docker compose up -d          # 后台启动前端, 访问 http://localhost:8501
+#   docker compose logs -f        # 看日志
+#   docker compose down           # 停止
+#
+#   docker compose run --rm daily # 手动跑一次每日流水线
+#
+# 为什么用 compose 而不是一堆 docker run:
+#   volume 挂载、env 文件、端口映射写一次就固定下来,
+#   不用每次记那一长串参数(而且少写一个 -v 就可能把数据库弄丢)。
+# ============================================================
+
+services:
+  # ---------------- 前端 ----------------
+  web:
+    build: .
+    image: quant-harness:latest
+    container_name: quant-harness-web
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env                     # 放 DEEPSEEK_API_KEY; 不进镜像(见 .dockerignore)
+    volumes:
+      # ★ 数据库/日志/配置必须挂载出来 ★
+      # 不挂的话, 容器一删, 五年历史数据和纸面账户全没了 —— 这是最容易踩的坑
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./output:/app/output
+    restart: unless-stopped
+
+  # ---------------- 每日流水线 ----------------
+  # 不常驻: 跑完 run_daily.py 就退出。配合宿主机的任务计划/cron 定时调用。
+  daily:
+    build: .
+    image: quant-harness:latest
+    container_name: quant-harness-daily
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    command: ["python", "run_daily.py"]
+    profiles:
+      # 用 profile 让它【默认不启动】(否则 up -d 会立刻跑一次流水线)
+      # 需要时: docker compose run --rm daily
+      - manual
+
+  # ---------------- 纸面跟踪报告 ----------------
+  report:
+    build: .
+    image: quant-harness:latest
+    volumes:
+      - ./data:/app/data
+    command: ["python", "paper_trading.py", "--report"]
+    profiles:
+      - manual
