@@ -24,7 +24,7 @@ Quant-Harness 是一个面向个人投资者的**全栈 AI 投研辅助系统**�
 
 为了平衡大模型 API 成本与全市场数据处理算力，系统采用三层漏斗式架构：
 
-![Quant-Harness 三层漏斗架构](architecture.png)
+![Quant-Harness 三层漏斗架构](docs/images/architecture.png)
 
 ### 各层数据流
 
@@ -51,13 +51,13 @@ Quant-Harness 是一个面向个人投资者的**全栈 AI 投研辅助系统**�
 - 按成交额排序（Top 300）后计算 20 日动量，筛选出前 100 只作为候选池。
 - *纯 Pandas 运算，零大模型消耗，速度极快。*
 
-![全市场海选终端输出](1-market-screening-terminal.png)
+![全市场海选终端输出](docs/images/1-market-screening-terminal.png)
 
 **2. 第二层（宏观层） - `src/news_agent.py`**
 - 接入财新宏观新闻（100 条摘要）与全 A 股财报预约披露日历。
 - **一次合并大模型调用**（控制 Token 消耗），对候选股进行"宏观情绪 + 财报雷区"双重过滤，收敛至 15 只目标股。
 
-![宏观新闻+财报预警终端日志](2-macro-earnings-filter.png)
+![宏观新闻+财报预警终端日志](docs/images/2-macro-earnings-filter.png)
 
 **3. 第三层（决策层） - `quant_agent.py`**
 - 基于 **LangGraph** 编排多智能体投委会：
@@ -66,8 +66,8 @@ Quant-Harness 是一个面向个人投资者的**全栈 AI 投研辅助系统**�
   - 🛡 **风险管理员**：判断大盘 MA20 避险状态。
   - 🏛 **投资组合经理**：汇总三方意见 + 调用回测工具，给出最终的买入/持有/卖出决策。
 
-![投资委员会决策报告](3-investment-committee-report.png)
-![Agent工作流程与回测数据](4-agent-workflow-and-backtest.png)
+![投资委员会决策报告](docs/images/3-investment-committee-report.png)
+![Agent工作流程与回测数据](docs/images/4-agent-workflow-and-backtest.png)
 
 ---
 
@@ -440,12 +440,15 @@ python tests/run_tests.py vacuum   # 只跑名字含 vacuum 的
 quant-harness/
 ├── app.py                    # Streamlit 前端（选股流水线 + 自动拉取 + 投委会）
 ├── quant_agent.py            # LangGraph 多智能体编排 + 4 个数据工具
+├── paper_trading.py          # 纸面跟踪：--init / --daily / --report / --capital-hint
+├── run_daily.py              # 每日流程编排（周频刷新目标池）
 ├── config.py                 # 统一配置（时区 / 滚动窗口 / 限速 / 路径）
 ├── run_sensitivity.py        # 参数敏感性批量跑批
 ├── src/
 │   ├── data_center.py        # 数据层：全量 / 增量 / 补齐 三模式 + 滚动清理
 │   ├── market_screener.py    # 第一层：全市场海选
 │   ├── news_agent.py         # 第二层：宏观新闻 + 财报预警过滤
+│   ├── paper_broker.py       # 撮合 / 记账 / 绩效 / 一手门槛（纯函数，可测试）
 │   ├── backtest.py           # Backtrader 回测引擎（含手续费/滑点/止损/双均线）
 │   ├── factor_score.py       # 多因子打分
 │   ├── plot_heatmap.py       # 参数热力图
@@ -454,13 +457,15 @@ quant-harness/
 │   ├── run_tests.py          # 入口
 │   ├── _runner.py            # 迷你测试框架（不依赖 pytest）
 │   ├── test_vacuum_neutral.py   # 信息真空期强制改写（注入测试）★
+│   ├── test_paper_broker.py     # 撮合/手续费/滑点/整手/一手门槛/方案A
 │   ├── test_fetch_start.py      # 逐标的基准
 │   ├── test_roll_cleanup.py     # 滚动清理幂等性
 │   └── test_roe_available.py    # ROE 法定披露日映射
-├── architecture.png          # 架构图
+├── docs/images/              # README 用图（架构图 + 4 张运行实况截图）
 ├── config/                   # candidates.json / target_pool.json（脚本产物）
 ├── logs/                     # 各脚本独立日志
-└── data/quant_data.db        # SQLite（滚动的最近 5 年）
+├── data/quant_data.db        # SQLite（滚动的最近 5 年）
+└── data/paper_*.{json,csv}   # 纸面账户 / 挂单 / 净值 / 成交（运行时数据，不入 git）
 ```
 
 > **路径注意**：`app.py`、`quant_agent.py`、`config.py`、`run_sensitivity.py` 在**项目根目录**；其余脚本在 **`src/`** 下。`config/` 是**数据目录**（放 JSON 产物），不是 Python 模块。
