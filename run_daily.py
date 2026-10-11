@@ -227,6 +227,26 @@ def main(argv: list[str] | None = None) -> int:
     if not ok:
         log.warning("目标池刷新失败, 但继续用【已有目标池】跑纸面跟踪")
 
+    # ---------------- 步骤 3.5: 让数据库跟上新的候选池 ★ ----------------
+    # 为什么必须有这一步:
+    #   海选每次可能选出【全新一批】股票, 而数据库里没有它们的行情。
+    #   不补的话, 纸面跟踪会因为"无当日价格"而只能操作少数几只,
+    #   "等权分散"就落空了 —— 这个坑实测踩过: 15 只目标池里库里只有 3 只。
+    #
+    # 为什么用 candidates.json(100 只) 而不是 target_pool.json(15 只):
+    #   候选池是每周海选的结果, 覆盖它就等于覆盖了整周可能进入目标池的股票。
+    #   而且数据是复用的 —— 今天补过, 明天 --update 就只拉增量, 很快。
+    #   代价: 首次运行要补齐 100 只的历史(约 20-30 分钟), 之后每天只需增量。
+    if CANDIDATES.exists():
+        ok, _ = run_step("③b 按候选池补齐行情(data_center --pool candidates)",
+                         DATA_CENTER, ["--pool", str(CANDIDATES), *dry],
+                         timeout_min=60)
+        results.append(("候选池补数据", ok))
+        if not ok:
+            log.warning("候选池补数据失败, 继续跑(纸面跟踪可能跳过部分标的)")
+    else:
+        results.append(("候选池补数据", True))
+
     # ---------------- 步骤 4: 纸面跟踪 ----------------
     if not (TARGET_POOL.exists()):
         log.error("目标池不存在, 无法纸面跟踪")

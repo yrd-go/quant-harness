@@ -389,6 +389,27 @@ def cmd_report() -> int:
         t["pnl"] = float(t["pnl"])
     tstat = pb.trade_stats(closed)
 
+    # ★ 只有 1 个数据点时 performance() 会返回 {} —— 此时算不出任何指标。
+    # 这是首次使用时(刚 --init + --daily 一次)的必然情况, 必须给友好提示
+    # 而不是 KeyError 崩溃。
+    if not perf:
+        print()
+        print("=" * 72)
+        print(f"纸面跟踪绩效报告  |  目前只有 {len(curve)} 个数据点 ({curve[0]['date']})")
+        print("=" * 72)
+        print("  还不能计算绩效指标 —— 至少需要 2 个交易日的净值记录。")
+        print()
+        print(f"  当前净值: {float(curve[0]['equity']):,.2f} 元")
+        print(f"  持仓只数: {curve[0].get('positions', '?')}")
+        print()
+        print("  下一步:")
+        print("    每个交易日收盘后跑一次  python paper_trading.py --daily")
+        print("    积累到 2 个交易日以上, 本报告就能算出收益/回撤/盈亏比。")
+        print()
+        print("  也可以先看流水线是否正常: python run_daily.py")
+        print("=" * 72)
+        return 0
+
     # 基准对比
     bench_ret = None
     try:
