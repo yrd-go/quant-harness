@@ -41,6 +41,13 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 
+# ---------- 纸面跟踪的运行时数据 ----------
+# 账户状态 / 挂单 / 净值曲线 / 成交明细。每跑一次 --daily 就变,
+# 且净值曲线会随时间无限增长。这是【运行时状态】不是源码 ——
+# 别人克隆仓库不该拿到你的模拟账户。
+data/paper_*.json
+data/paper_*.csv
+
 # ---------- 选股池中间产物(由 market_screener / news_agent 重新生成) ----------
 config/*.json
 
